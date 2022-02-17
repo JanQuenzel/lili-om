@@ -507,7 +507,7 @@ public:
         loop_to_close = false;
         loop_closed = false;
 
-        q_lb = Eigen::Quaterniond(ql2b_w, ql2b_x, ql2b_y, ql2b_z);
+        q_lb = Eigen::Quaterniond(ql2b_w, ql2b_x, ql2b_y, ql2b_z).normalized();
         t_lb = Eigen::Vector3d(tl2b_x, tl2b_y, tl2b_z);
 
         q_bl = q_lb.inverse();

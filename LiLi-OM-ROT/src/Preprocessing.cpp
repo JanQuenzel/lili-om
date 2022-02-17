@@ -105,7 +105,7 @@ public:
             qlb3 = 0;
         }
 
-        q_lb = Eigen::Quaterniond(qlb0, qlb1, qlb2, qlb3);
+        q_lb = Eigen::Quaterniond(qlb0, qlb1, qlb2, qlb3).normalized();
 
         sub_Lidar_cloud = nh.subscribe<sensor_msgs::PointCloud2>(lidar_topic, 100, &Preprocessing::cloudHandler, this);
         sub_imu = nh.subscribe<sensor_msgs::Imu>(imu_topic, 200, &Preprocessing::imuHandler, this);
@@ -248,9 +248,11 @@ public:
     void cloudHandler( const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
     {
         // cache point cloud
+        //cout << "got cloud." << endl;
         cloud_queue.push_back(*laserCloudMsg);
-        if (cloud_queue.size() <= 2)
+        if (cloud_queue.size() <= 2) { //cout << "not enough clouds." <<endl;
             return;
+        }
         else {
             current_cloud_msg = cloud_queue.front();
             cloud_queue.pop_front();
@@ -275,17 +277,30 @@ public:
 
         pcl::PointCloud<PointType> lidar_cloud_in;
         pcl::fromROSMsg(current_cloud_msg, lidar_cloud_in);
-        std::vector<int> indices;
-
-        pcl::removeNaNFromPointCloud(lidar_cloud_in, lidar_cloud_in, indices);
-        removeClosedPointCloud(lidar_cloud_in, lidar_cloud_in, 3.0);
-
+//        std::vector<int> indices;
+//        pcl::removeNaNFromPointCloud(lidar_cloud_in, lidar_cloud_in, indices);
+//        removeClosedPointCloud(lidar_cloud_in, lidar_cloud_in, 3.0);
+        constexpr float thresh = 3.0;
+        constexpr float thresh2 = thresh*thresh;
 
         int cloudSize = lidar_cloud_in.points.size();
-        float startOri = -atan2(lidar_cloud_in.points[0].y, lidar_cloud_in.points[0].x);
-        float endOri = -atan2(lidar_cloud_in.points[cloudSize - 1].y,
-                lidar_cloud_in.points[cloudSize - 1].x) +
-                2 * M_PI;
+        int firstValid = 0;
+        for (firstValid = 0; firstValid < cloudSize; ++firstValid) {
+            const float d = lidar_cloud_in.points[firstValid].x * lidar_cloud_in.points[firstValid].x +
+                    lidar_cloud_in.points[firstValid].y * lidar_cloud_in.points[firstValid].y +
+                    lidar_cloud_in.points[firstValid].z * lidar_cloud_in.points[firstValid].z;
+            if ( std::isfinite(d) && d >= thresh2 ) break;
+        }
+        int lastValid = cloudSize - 1;
+        for (lastValid = cloudSize - 1; lastValid >= 0; --lastValid) {
+            const float d = lidar_cloud_in.points[lastValid].x * lidar_cloud_in.points[lastValid].x +
+                    lidar_cloud_in.points[lastValid].y * lidar_cloud_in.points[lastValid].y +
+                    lidar_cloud_in.points[lastValid].z * lidar_cloud_in.points[lastValid].z;
+            if ( std::isfinite(d) && d >= thresh2 ) break;
+        }
+
+        float startOri = -atan2(lidar_cloud_in.points[firstValid].y, lidar_cloud_in.points[firstValid].x);
+        float endOri = -atan2(lidar_cloud_in.points[lastValid].y, lidar_cloud_in.points[lastValid].x) + 2 * M_PI;
 
         if (endOri - startOri > 3 * M_PI)
             endOri -= 2 * M_PI;
@@ -293,6 +308,7 @@ public:
         else if (endOri - startOri < M_PI)
             endOri += 2 * M_PI;
 
+        //ROS_INFO_STREAM("points remaining: " << cloudSize << " fv: " << firstValid << " lv: " << lastValid << " nscans: " << N_SCANS);
 
         if(first_imu)
             processIMU(time_scan_next);
@@ -305,12 +321,20 @@ public:
         PointType point;
         PointType point_undis;
         std::vector<pcl::PointCloud<PointType>> laserCloudScans(N_SCANS);
-        for (int i = 0; i < cloudSize; i++) {
+        for (int i = 0; i < cloudSize; ++i) {
+            const float d = lidar_cloud_in.points[i].x * lidar_cloud_in.points[i].x +
+                    lidar_cloud_in.points[i].y * lidar_cloud_in.points[i].y +
+                    lidar_cloud_in.points[i].z * lidar_cloud_in.points[i].z;
+            if ( d < thresh2 || ! std::isfinite(d) )
+            {
+                --count;
+                continue;
+            }
+
             point.x = lidar_cloud_in.points[i].x;
             point.y = lidar_cloud_in.points[i].y;
             point.z = lidar_cloud_in.points[i].z;
             point.intensity = 0.1 * lidar_cloud_in.points[i].intensity;
-
 
             float angle = atan(point.z / sqrt(point.x * point.x + point.y * point.y)) * 180 / M_PI;
             int scanID = 0;
@@ -340,6 +364,9 @@ public:
                     count--;
                     continue;
                 }
+            }
+            else if (N_SCANS == 128) {
+                scanID = i % 128; //lidar_cloud_in.height;
             }
             else {
                 printf("wrong scan number\n");
@@ -372,7 +399,6 @@ public:
         }
 
         cloudSize = count;
-        // printf("points size %d \n", cloudSize);
 
         pcl::PointCloud<PointType>::Ptr laserCloud(new pcl::PointCloud<PointType>());
         for (int i = 0; i < N_SCANS; i++) {
@@ -380,7 +406,6 @@ public:
             *laserCloud += laserCloudScans[i];
             scanEndInd[i] = laserCloud->size() - 6;
         }
-
 
         for (int i = 5; i < cloudSize - 5; i++) {
             float diffX = laserCloud->points[i - 5].x + laserCloud->points[i - 4].x + laserCloud->points[i - 3].x + laserCloud->points[i - 2].x + laserCloud->points[i - 1].x - 10 * laserCloud->points[i].x + laserCloud->points[i + 1].x + laserCloud->points[i + 2].x + laserCloud->points[i + 3].x + laserCloud->points[i + 4].x + laserCloud->points[i + 5].x;
