@@ -2144,6 +2144,15 @@ public:
             odom_mapping.pose.pose.position.y = pose_info_cloud_frame->points[pose_info_cloud_frame->points.size()-slide_window_width].y;
             odom_mapping.pose.pose.position.z = pose_info_cloud_frame->points[pose_info_cloud_frame->points.size()-slide_window_width].z;
             pub_odom.publish(odom_mapping);
+            {
+              // write to file:
+              static std::ofstream posesFile ("./lili_om_rot_after_map_poses.txt");
+              if( posesFile.is_open() )
+              {
+                 posesFile << (odom_mapping.header.stamp.toNSec()) << " " << odom_mapping.pose.pose.position.x << " " << odom_mapping.pose.pose.position.y << " " << odom_mapping.pose.pose.position.z
+                           << " " << odom_mapping.pose.pose.orientation.x << " " << odom_mapping.pose.pose.orientation.y << " " << odom_mapping.pose.pose.orientation.z << " " << odom_mapping.pose.pose.orientation.w <<"\n";
+              }
+            }
         }
 
         sensor_msgs::PointCloud2 msgs;
