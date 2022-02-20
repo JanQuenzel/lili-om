@@ -16,6 +16,10 @@
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/ISAM2.h>
 
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/exact_time.h>
+#include <message_filters/subscriber.h>
+
 using namespace gtsam;
 
 class BackendFusion {
@@ -24,12 +28,23 @@ private:
     int map_pub_cnt = 0;
     ros::NodeHandle nh;
 
-    ros::Subscriber sub_edge;
-    ros::Subscriber sub_surf;
+    static constexpr size_t max_imu_buf_size = 6000; // stupidly high number to quick-fix idx problems...
+    static constexpr size_t max_odom_buf_size = 50;
+
+    //ros::Subscriber sub_edge;
+    //ros::Subscriber sub_surf;
+    //ros::Subscriber sub_full_cloud;
     ros::Subscriber sub_odom;
     ros::Subscriber sub_each_odom;
-    ros::Subscriber sub_full_cloud;
     ros::Subscriber sub_imu;
+
+
+    boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> sub_edge_ptr;
+    boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> sub_surf_ptr;
+    boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> sub_full_cloud_ptr;
+
+    typedef message_filters::sync_policies::ExactTime<sensor_msgs::PointCloud2,sensor_msgs::PointCloud2,sensor_msgs::PointCloud2> MySyncPolicy;
+    boost::shared_ptr<message_filters::Synchronizer<MySyncPolicy>> sync_ptr;
 
     ros::Publisher pub_map;
     ros::Publisher pub_odom;
@@ -161,9 +176,9 @@ private:
 
     int num_kf_sliding;
 
-    vector<sensor_msgs::ImuConstPtr> imu_buf;
+    vector<sensor_msgs::ImuConstPtr> imu_buf; // ids are generated from the size -.- just why?
     nav_msgs::Odometry::ConstPtr odom_cur;
-    vector<nav_msgs::Odometry::ConstPtr> each_odom_buf;
+    vector<nav_msgs::Odometry::ConstPtr> each_odom_buf; // ids are generated from its size...
     double time_last_imu;
     double cur_time_imu;
     bool first_imu;
@@ -231,9 +246,17 @@ public:
         initializeParameters();
         allocateMemory();
 
-        sub_full_cloud = nh.subscribe<sensor_msgs::PointCloud2>("/full_point_cloud", 100, &BackendFusion::full_cloudHandler, this);
-        sub_edge = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_corner_last", 100, &BackendFusion::edge_lastHandler, this);
-        sub_surf = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_surf_last", 100, &BackendFusion::surfaceLastHandler, this);
+        //sub_full_cloud = nh.subscribe<sensor_msgs::PointCloud2>("/full_point_cloud", 100, &BackendFusion::full_cloudHandler, this);
+        //sub_edge = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_corner_last", 100, &BackendFusion::edge_lastHandler, this);
+        //sub_surf = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_surf_last", 100, &BackendFusion::surfaceLastHandler, this);
+
+        sub_edge_ptr = boost::make_shared<message_filters::Subscriber<sensor_msgs::PointCloud2>>( nh, "/laser_cloud_corner_last", 10 );
+        sub_surf_ptr = boost::make_shared<message_filters::Subscriber<sensor_msgs::PointCloud2>>( nh, "/laser_cloud_surf_last", 10 );
+        sub_full_cloud_ptr = boost::make_shared<message_filters::Subscriber<sensor_msgs::PointCloud2>>( nh, "/full_point_cloud", 10 );
+
+        sync_ptr = boost::make_shared<message_filters::Synchronizer<MySyncPolicy>>(MySyncPolicy(10),*sub_edge_ptr,*sub_surf_ptr,*sub_full_cloud_ptr);
+        sync_ptr->registerCallback(boost::bind(&BackendFusion::allSyncCallback, this, _1, _2, _3 ));
+
         sub_odom = nh.subscribe<nav_msgs::Odometry>("/odom", 5, &BackendFusion::odomHandler, this);
         sub_each_odom = nh.subscribe<nav_msgs::Odometry>("/each_odom", 5, &BackendFusion::eachOdomHandler, this);
 
@@ -526,7 +549,6 @@ public:
         edge_last->clear();
         time_new_edge = pointCloudIn->header.stamp.toSec();
         pcl::fromROSMsg(*pointCloudIn, *edge_last);
-
         new_edge = true;
     }
 
@@ -535,6 +557,14 @@ public:
         time_new_surf = pointCloudIn->header.stamp.toSec();
         pcl::fromROSMsg(*pointCloudIn, *surf_last);
         new_surf = true;
+    }
+
+    void allSyncCallback ( const sensor_msgs::PointCloud2ConstPtr& edgeCloudIn, const sensor_msgs::PointCloud2ConstPtr& surfCloudIn, const sensor_msgs::PointCloud2ConstPtr& fullCloudIn )
+    {
+        // *sub_edge_ptr,*sub_surf_ptr,*sub_full_cloud_ptr
+        edge_lastHandler( edgeCloudIn );
+        surfaceLastHandler( surfCloudIn );
+        full_cloudHandler( fullCloudIn );
     }
 
     void odomHandler(const nav_msgs::Odometry::ConstPtr& odomIn) {
@@ -550,8 +580,10 @@ public:
         time_new_each_odom = odomIn->header.stamp.toSec();
         each_odom_buf.push_back(odomIn);
 
-        if(each_odom_buf.size() > 50)
-            each_odom_buf[each_odom_buf.size() - 51] = nullptr;
+        if(each_odom_buf.size() > max_odom_buf_size)
+        {
+            each_odom_buf[each_odom_buf.size() - (max_odom_buf_size+1)] = nullptr; // ever heard of deque?
+        }
 
         new_each_odom = true;
     }
@@ -561,8 +593,10 @@ public:
 
         imu_buf.push_back(ImuIn);
 
-        if(imu_buf.size() > 600)
-            imu_buf[imu_buf.size() - 601] = nullptr;
+        if(imu_buf.size() > max_imu_buf_size)
+        {
+            imu_buf[imu_buf.size() - (max_imu_buf_size+1)] = nullptr;// ever heard of deque?
+        }
 
         if (cur_time_imu < 0)
             cur_time_imu = time_last_imu;
@@ -1540,8 +1574,13 @@ public:
         int i = idx_imu;
         Eigen::Quaterniond tmpOrient;
         double timeodom_cur = odom_cur->header.stamp.toSec();
+        if ( imu_buf[i] == nullptr )
+        {
+            ROS_ERROR( "You need to increase the buffer size or fix this X.size()-y indexing..." );
+            throw std::runtime_error("nullptr");
+        }
         if(imu_buf[i]->header.stamp.toSec() > timeodom_cur)
-            ROS_WARN("Timestamp not synchronized, please check your hardware!");
+            ROS_WARN("Timestamp not synchronized, please check your hardware!"); // nope, the buffer is too small.
         while(imu_buf[i]->header.stamp.toSec() < timeodom_cur) {
             double t = imu_buf[i]->header.stamp.toSec();
             if (cur_time_imu < 0)
@@ -2164,7 +2203,6 @@ public:
             pub_poses.publish(msgs);
         }
 
-
         PointPoseInfo Tbl;
         Tbl.qw = q_bl.w();
         Tbl.qx = q_bl.x();
@@ -2207,6 +2245,7 @@ public:
             msgs.header.frame_id = frame_id;
             pub_full.publish(msgs);
         }
+        //ROS_WARN_STREAM("sizes... imu: " << imu_buf.size() << " odom: " << each_odom_buf.size() << " pI: " << pre_integrations.size() << " iiik: " << imu_idx_in_kf.size() << " fcds: " << full_clouds_ds.size() << " eds: " << edge_lasts_ds.size() << " sds: " << surf_lasts_ds.size() << " ef: " << edge_frames.size() << " sf: " << surf_frames.size() );
     }
 
     void clearCloud() {
