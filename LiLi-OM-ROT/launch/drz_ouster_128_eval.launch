@@ -15,7 +15,7 @@
     <node pkg="tf" type="static_transform_publisher" name="lili_om_rot" args="0 0 0 0 0 0 os_lidar lili_om_rot 50"/>
 
     <!--- lili_om_rot -->
-    <node launch-prefix="gdb -ex run --args " pkg="lili_om_rot" type="Preprocessing" name="Preprocessing" output="screen"/>
+    <node pkg="lili_om_rot" type="Preprocessing" name="Preprocessing" output="screen"/>
     <node pkg="lili_om_rot" type="LidarOdometry" name="LidarOdometry" output="screen"/>
     <node pkg="lili_om_rot" type="BackendFusion" name="BackendFusion" output="screen"/>
 
