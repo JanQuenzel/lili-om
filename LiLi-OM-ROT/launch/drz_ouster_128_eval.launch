@@ -13,6 +13,7 @@
     <rosparam file = "$(find lili_om_rot)/config/config_drz.yaml"/>
     
     <node pkg="tf" type="static_transform_publisher" name="lili_om_rot" args="0 0 0 0 0 0 os_lidar lili_om_rot 50"/>
+    <!--<node pkg="tf" type="static_transform_publisher" name="lili_om_rot" args="0 0 0 0 0 0 base_link lili_om_rot 50"/>--> <!-- common frame is by lidar -->
 
     <!--- lili_om_rot -->
     <node pkg="lili_om_rot" type="Preprocessing" name="Preprocessing" output="screen"/>

@@ -6,6 +6,8 @@
 
 class Preprocessing {
 private:
+    static constexpr size_t max_imu_buf_size = 6000; // stupidly high number to quick-fix idx problems...
+
     float cloudCurvature[400000];
     int cloudSortInd[400000];
     int cloudNeighborPicked[400000];
@@ -189,6 +191,7 @@ public:
         int i = idx_imu;
         if(i >= imu_buf.size())
             i--;
+        if ( imu_buf[i] == nullptr ) throw std::runtime_error("srsly...");
         while(imu_buf[i]->header.stamp.toSec() < t_cur) {
 
             double t = imu_buf[i]->header.stamp.toSec();
@@ -226,8 +229,8 @@ public:
     {
         imu_buf.push_back(ImuIn);
 
-        if(imu_buf.size() > 600)
-            imu_buf[imu_buf.size() - 601] = nullptr;
+        if(imu_buf.size() > max_imu_buf_size)
+            imu_buf[imu_buf.size() - (max_imu_buf_size+1)] = nullptr;
 
         if (current_time_imu < 0)
             current_time_imu = ImuIn->header.stamp.toSec();
@@ -265,6 +268,7 @@ public:
         int tmpIdx = 0;
         if(idx_imu > 0)
             tmpIdx = idx_imu - 1;
+        if ( imu_buf[idx_imu] == nullptr ) throw std::runtime_error("srsly...");
         if (imu_buf.empty() || imu_buf[tmpIdx]->header.stamp.toSec() > time_scan_next) {
             ROS_WARN("Waiting for IMU data ...");
             return;
