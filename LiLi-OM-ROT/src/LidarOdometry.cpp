@@ -3,14 +3,24 @@
 #include "utils/timer.h"
 #include "factors/LidarKeyframeFactor.h"
 
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/exact_time.h>
+#include <message_filters/subscriber.h>
+
 class LidarOdometry {
 private:
     int odom_pub_cnt = 0;
     ros::NodeHandle nh;
 
-    ros::Subscriber sub_edge;
-    ros::Subscriber sub_surf;
-    ros::Subscriber sub_full_cloud;
+    //ros::Subscriber sub_edge;
+    //ros::Subscriber sub_surf;
+    //ros::Subscriber sub_full_cloud;
+    boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> sub_edge_ptr;
+    boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> sub_surf_ptr;
+    boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> sub_full_cloud_ptr;
+
+    typedef message_filters::sync_policies::ExactTime<sensor_msgs::PointCloud2,sensor_msgs::PointCloud2,sensor_msgs::PointCloud2> MySyncPolicy;
+    boost::shared_ptr<message_filters::Synchronizer<MySyncPolicy>> sync_ptr;
 
     ros::Publisher pub_edge;
     ros::Publisher pub_surf;
@@ -83,9 +93,17 @@ public:
         initializeParameters();
         allocateMemory();
 
-        sub_edge = nh.subscribe<sensor_msgs::PointCloud2>("/edge_features", 100, &LidarOdometry::laserCloudLessSharpHandler, this);
-        sub_surf = nh.subscribe<sensor_msgs::PointCloud2>("/surf_features", 100, &LidarOdometry::laserCloudLessFlatHandler, this);
-        sub_full_cloud = nh.subscribe<sensor_msgs::PointCloud2>("/lidar_cloud_cutted", 100, &LidarOdometry::FullPointCloudHandler, this);
+        //sub_edge = nh.subscribe<sensor_msgs::PointCloud2>("/edge_features", 100, &LidarOdometry::laserCloudLessSharpHandler, this);
+        //sub_surf = nh.subscribe<sensor_msgs::PointCloud2>("/surf_features", 100, &LidarOdometry::laserCloudLessFlatHandler, this);
+        //sub_full_cloud = nh.subscribe<sensor_msgs::PointCloud2>("/lidar_cloud_cutted", 100, &LidarOdometry::FullPointCloudHandler, this);
+
+        sub_edge_ptr = boost::make_shared<message_filters::Subscriber<sensor_msgs::PointCloud2>>( nh, "/edge_features", 10 );
+        sub_surf_ptr = boost::make_shared<message_filters::Subscriber<sensor_msgs::PointCloud2>>( nh, "/surf_features", 10 );
+        sub_full_cloud_ptr = boost::make_shared<message_filters::Subscriber<sensor_msgs::PointCloud2>>( nh, "/lidar_cloud_cutted", 10 );
+
+        sync_ptr = boost::make_shared<message_filters::Synchronizer<MySyncPolicy>>(MySyncPolicy(10),*sub_edge_ptr,*sub_surf_ptr,*sub_full_cloud_ptr);
+        sync_ptr->registerCallback(boost::bind(&LidarOdometry::allSyncCallback, this, _1, _2, _3 ));
+
 
         pub_edge = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_corner_last", 100);
         pub_surf = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_surf_last", 100);
@@ -173,6 +191,13 @@ public:
         cloud_header = pointCloudIn->header;
         pcl::fromROSMsg(*pointCloudIn, *full_cloud);
         new_full_cloud = true;
+    }
+
+    void allSyncCallback ( const sensor_msgs::PointCloud2ConstPtr& edgeCloudIn, const sensor_msgs::PointCloud2ConstPtr& surfCloudIn, const sensor_msgs::PointCloud2ConstPtr& fullCloudIn )
+    {
+        laserCloudLessSharpHandler( edgeCloudIn );
+        laserCloudLessFlatHandler( surfCloudIn );
+        FullPointCloudHandler( fullCloudIn );
     }
 
     void undistortion(const pcl::PointCloud<PointType>::Ptr &pcloud, const Eigen::Vector3d trans, const Eigen::Quaterniond quat) {
@@ -581,6 +606,22 @@ public:
         odom.pose.pose.position.y = abs_pose[5];
         odom.pose.pose.position.z = abs_pose[6];
         pub_odom.publish(odom);
+
+        {
+          // write to file:
+          static std::ofstream posesFile ("./lili_om_rot_after_odom_poses.txt");
+          if( posesFile.is_open() )
+          {
+             posesFile << (odom.header.stamp.toNSec())
+                       << " " << odom.pose.pose.position.x
+                       << " " << odom.pose.pose.position.y
+                       << " " << odom.pose.pose.position.z
+                       << " " << odom.pose.pose.orientation.x
+                       << " " << odom.pose.pose.orientation.y
+                       << " " << odom.pose.pose.orientation.z
+                       << " " << odom.pose.pose.orientation.w <<"\n";
+          }
+        }
 
         geometry_msgs::PoseStamped poseStamped;
         poseStamped.header = odom.header;
