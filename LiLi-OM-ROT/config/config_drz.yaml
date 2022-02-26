@@ -20,7 +20,7 @@ lidar_odometry:
 
 backend_fusion:
   max_num_iter: 15
-  loop_closure_on: true
+  loop_closure_on: false
   local_map_width: 50
   lc_search_radius: 15
   lc_map_width: 25
@@ -28,7 +28,7 @@ backend_fusion:
   slide_window_width: 3
   imu_topic: "/dji_sdk/imu"
   lidar_const: 7.5
-  mapping_interval: 2
+  mapping_interval: 1
   lc_time_thres: 60.0
   surf_dist_thres: 0.12
   kd_max_radius: 1.0
