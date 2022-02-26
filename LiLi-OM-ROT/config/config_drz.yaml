@@ -35,10 +35,10 @@ backend_fusion:
   save_pcd: false
 
 #extrinsic imu to lidar
-  ql2b_w: 0.0247437
-  ql2b_x: 0.706674
-  ql2b_y: -0.706674
-  ql2b_z: 0.0247437
+  ql2b_w: 0.0
+  ql2b_x: 0.7071
+  ql2b_y: -0.7071
+  ql2b_z: 0.0
   tl2b_x: 0.031775 
   tl2b_y: 0.0832276 
   tl2b_z: -0.217189
